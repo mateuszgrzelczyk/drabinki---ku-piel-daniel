@@ -1,121 +1,155 @@
 <?php
+require 'db_functions.php';
 session_start();
 
-if (isset($_POST['reset'])) {
-    session_unset();
-    session_destroy();
-    header("Location: " . $_SERVER['PHP_SELF']);
+// Sprawdzenie, czy użytkownik jest zalogowany
+if (!czyZalogowany()) {
+    header("Location: login.php");
     exit();
 }
 
+// Sprawdzamy rolę użytkownika
+$rola = sprawdzRole();
+
+$komunikat = '';
+$pokazPrzyciskZakonczTurniej = false;
+
+// Obsługa żądań POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (isset($_POST['numParticipants']) && $_POST['numParticipants'] > 0) {
-        $_SESSION['numParticipants'] = intval($_POST['numParticipants']);
-        $_SESSION['round'] = 1;
-        $_SESSION['rounds'] = []; 
-    }
-
-    if (isset($_POST['participants'])) {
-        $_SESSION['participants'] = $_POST['participants'];
-    }
-
-    if (isset($_POST['winners'])) {
-        if (!isset($_SESSION['rounds'][$_SESSION['round']])) {
-            $_SESSION['rounds'][$_SESSION['round']] = [];
+    if ($rola === 'admin') { // Tylko administrator ma pełne uprawnienia
+        if (isset($_POST['dodajUczestnika'])) {
+            $imie = trim($_POST['imie']);
+            if (!empty($imie)) {
+                dodajUczestnika($pdo, $imie);
+            } else {
+                $komunikat = "Imię uczestnika nie może być puste.";
+            }
         }
-        $_SESSION['rounds'][$_SESSION['round']] = $_SESSION['participants'];
-        $_SESSION['participants'] = $_POST['winners'];
-        $_SESSION['round']++;
-    }
 
-    if (isset($_SESSION['participants']) && count($_SESSION['participants']) === 1) {
-        $_SESSION['finalWinner'] = $_SESSION['participants'][0];
-        $_SESSION['rounds'][$_SESSION['round']] = $_SESSION['participants'];
+        if (isset($_POST['generujDrabinke'])) {
+            $uczestnicy = pobierzUczestnikow($pdo);
+            $komunikat = generujDrabinke($pdo, $uczestnicy);
+        }
+
+        if (isset($_POST['zapiszMecz'])) {
+            $runda = $_POST['runda'];
+            $ucz1 = $_POST['uczestnik1'];
+            $ucz2 = $_POST['uczestnik2'];
+            $zwyciezca = $_POST['zwyciezca'];
+            zapiszZwyciezce($pdo, $runda, $ucz1, $ucz2, $zwyciezca);
+        }
+
+        if (isset($_POST['zakonczTurniej'])) {
+            $zwyciezca = sprawdzCzyKoniecTurnieju($pdo);
+            if ($zwyciezca) {
+                $komunikat = "Turniej zakończony! Zwycięzca: $zwyciezca";
+            } else {
+                $komunikat = "Turniej jeszcze nie zakończony.";
+            }
+        }
+
+        if (isset($_POST['nowyTurniej'])) {
+            resetujTurniej($pdo);
+            header("Location: index.php");
+            exit();
+        }
+    } else {
+        $komunikat = "Brak uprawnień do wykonania tej akcji.";
     }
 }
+
+// Pobieranie danych do wyświetlenia
+$uczestnicy = pobierzUczestnikow($pdo);
+$drabinka = pobierzDrabinke($pdo);
+$pokazPrzyciskZakonczTurniej = czyRundaFinalowaZakonczona($pdo);
 ?>
 
 <!DOCTYPE html>
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generator Drabinek Turniejowych</title>
-    <link rel="stylesheet" href="styles.css">
+    <title>Turniej</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: auto; }
+        .message { color: red; }
+    </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Generator Drabinek Turniejowych</h1>
+<div class="container">
+    <h1>Turniej</h1>
+    <p>Witaj, <?= htmlspecialchars($_SESSION['username']) ?>! (<a href="logout.php">Wyloguj</a>)</p>
+    <p class="message"><?= htmlspecialchars($komunikat) ?></p>
 
-        <?php if (!isset($_SESSION['numParticipants']) || $_SESSION['numParticipants'] === 0): ?>
-            <form method="POST" action="">
-                <label for="numParticipants">Podaj liczbę uczestników:</label>
-                <input type="number" id="numParticipants" name="numParticipants" min="2" required>
-                <button type="submit">Dalej</button>
-            </form>
-        <?php elseif (!isset($_SESSION['participants'])): ?>
-            <h2>Wprowadź imiona i nazwiska uczestników:</h2>
-            <form method="POST" action="">
-                <div class="participants-list">
-                    <?php for ($i = 1; $i <= $_SESSION['numParticipants']; $i++): ?>
-                        <div>
-                            <label for="participant_<?= $i ?>">Uczestnik <?= $i ?>:</label>
-                            <input type="text" name="participants[]" id="participant_<?= $i ?>" required>
-                        </div>
-                    <?php endfor; ?>
-                </div>
-                <button type="submit">Generuj Drabinkę</button>
-            </form>
-        <?php elseif (isset($_SESSION['participants']) && !isset($_SESSION['finalWinner'])): ?>
-            <h2>Runda <?= $_SESSION['round'] ?></h2>
-            <div class="bracket">
-                <?php
-                shuffle($_SESSION['participants']);
-                $matches = array_chunk($_SESSION['participants'], 2);
-                ?>
-                <form method="POST" action="">
-                    <?php foreach ($matches as $index => $match): ?>
-                        <div class="match">
-                            <?php if (count($match) === 2): ?>
-                                <div class="participant"><?= htmlspecialchars($match[0]) ?></div>
-                                <div class="participant"><?= htmlspecialchars($match[1]) ?></div>
-                                <label for="winner_<?= $index ?>">Wybierz zwycięzcę:</label>
-                                <select name="winners[]" id="winner_<?= $index ?>" required>
-                                    <option value="<?= htmlspecialchars($match[0]) ?>"><?= htmlspecialchars($match[0]) ?></option>
-                                    <option value="<?= htmlspecialchars($match[1]) ?>"><?= htmlspecialchars($match[1]) ?></option>
-                                </select>
-                            <?php else: ?>
-                                <div class="participant"><?= htmlspecialchars($match[0]) ?></div>
-                                <input type="hidden" name="winners[]" value="<?= htmlspecialchars($match[0]) ?>" />
-                                <p>Brak pary, przechodzi dalej</p>
-                            <?php endif; ?>
-                        </div>
-                    <?php endforeach; ?>
-                    <button type="submit">Przejdź do następnej rundy</button>
-                </form>
-            </div>
-        <?php elseif (isset($_SESSION['finalWinner'])): ?>
+    <?php if ($rola === 'admin'): ?>
+        <!-- Formularz dodawania uczestnika (tylko dla administratora) -->
+        <form method="POST">
+            <label for="imie">Imię uczestnika:</label>
+            <input type="text" id="imie" name="imie" required>
+            <button type="submit" name="dodajUczestnika">Dodaj uczestnika</button>
+        </form>
+    <?php endif; ?>
 
-            <h2>Podsumowanie Turnieju</h2>
-            <div class="summary">
-                <?php foreach ($_SESSION['rounds'] as $roundNumber => $roundParticipants): ?>
-                    <h3>Runda <?= $roundNumber ?></h3>
-                    <div class="round">
-                        <?php foreach ($roundParticipants as $participant): ?>
-                            <div class="participant"><?= htmlspecialchars($participant) ?></div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endforeach; ?>
-            </div>
-            
-            <div class="final">
-                <h1>Zwycięzca: <span style="color: red"><?= htmlspecialchars($_SESSION['finalWinner']) ?></span></h1>
-            </div>
-            <form method="POST" action="">
-                <button type="submit" name="reset" value="true">Zacznij od nowa</button>
-            </form>
+    <!-- Lista uczestników (widoczna dla wszystkich) -->
+    <h2>Lista uczestników:</h2>
+    <ul>
+        <?php foreach ($uczestnicy as $uczestnik): ?>
+            <li><?= htmlspecialchars($uczestnik['imie']) ?></li>
+        <?php endforeach; ?>
+    </ul>
+
+    <?php if ($rola === 'admin'): ?>
+        <!-- Generowanie drabinki (tylko dla administratora) -->
+        <form method="POST">
+            <button type="submit" name="generujDrabinke">Generuj drabinkę</button>
+        </form>
+    <?php endif; ?>
+
+    <!-- Drabinka turniejowa (widoczna dla wszystkich) -->
+    <h2>Drabinka turniejowa:</h2>
+    <div class="drabinka">
+        <?php if (!empty($drabinka)): ?>
+            <?php foreach ($drabinka as $mecz): ?>
+                <?php if ($mecz['zwyciezca'] === null && $rola === 'admin'): ?>
+                    <!-- Formularz wyboru zwycięzcy meczu -->
+                    <form method="POST" style="margin-bottom: 10px;">
+                        <input type="hidden" name="runda" value="<?= $mecz['runda'] ?>">
+                        <input type="hidden" name="uczestnik1" value="<?= $mecz['uczestnik1_id'] ?>">
+                        <input type="hidden" name="uczestnik2" value="<?= $mecz['uczestnik2_id'] ?>">
+
+                        <label for="zwyciezca">Zwycięzca:</label>
+                        <select name="zwyciezca" required>
+                            <option value="<?= $mecz['uczestnik1_id'] ?>"><?= htmlspecialchars($mecz['uczestnik1']) ?></option>
+                            <option value="<?= $mecz['uczestnik2_id'] ?>"><?= htmlspecialchars($mecz['uczestnik2']) ?></option>
+                        </select>
+                        <button type="submit" name="zapiszMecz">Zapisz zwycięzcę</button>
+                    </form>
+                <?php else: ?>
+                    <!-- Wyświetlanie wyników meczu -->
+                    <p>
+                        Runda <?= $mecz['runda'] ?>: <?= htmlspecialchars($mecz['uczestnik1']) ?> vs <?= htmlspecialchars($mecz['uczestnik2']) ?> | 
+                        Zwycięzca: <?= htmlspecialchars($mecz['zwyciezca']) ?>
+                    </p>
+                <?php endif; ?>
+            <?php endforeach; ?>
+        <?php else: ?>
+            <p>Brak danych do wyświetlenia drabinki.</p>
         <?php endif; ?>
     </div>
+
+    <?php if ($rola === 'admin'): ?>
+        <!-- Przycisk zakończenia turnieju (tylko dla administratora) -->
+        <?php if ($pokazPrzyciskZakonczTurniej): ?>
+            <form method="POST" style="margin-top: 20px;">
+                <button type="submit" name="zakonczTurniej">Zakończ turniej</button>
+            </form>
+        <?php endif; ?>
+
+        <!-- Przycisk nowego turnieju (tylko dla administratora) -->
+        <form method="POST" style="margin-top: 20px;">
+            <button type="submit" name="nowyTurniej">Nowy turniej</button>
+        </form>
+    <?php endif; ?>
+</div>
 </body>
 </html>
-
