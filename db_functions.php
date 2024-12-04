@@ -28,7 +28,7 @@ function generujDrabinke($pdo, $uczestnicy) {
     // Jeśli liczba uczestników nie jest potęgą 2, dodajemy 'bye' dla tych, którzy nie mają przeciwnika
     $uczestnicyZBye = array_merge($uczestnicy, array_fill(0, $najblizszaPotega2 - $liczbaUczestnikow, null));
 
-    // Generowanie meczów
+    // Generowanie meczów pierwszej rundy
     $runda = 1;
     for ($i = 0; $i < $najblizszaPotega2; $i += 2) {
         if ($uczestnicyZBye[$i] !== null && $uczestnicyZBye[$i + 1] !== null) {
@@ -36,15 +36,46 @@ function generujDrabinke($pdo, $uczestnicy) {
             zapiszMecz($pdo, $runda, $uczestnicyZBye[$i]['id'], $uczestnicyZBye[$i + 1]['id'], null);
         } elseif ($uczestnicyZBye[$i] !== null && $uczestnicyZBye[$i + 1] === null) {
             // Uczestnik z bye przechodzi automatycznie do następnej rundy
-            zapiszMecz($pdo, $runda, $uczestnicyZBye[$i]['id'], null, $uczestnicyZBye[$i]['id']);
+            zapiszMecz($pdo, $runda, $uczestnicyZBye[$i]['id'], null, $uczestnikZBye[$i]['id']);
         } elseif ($uczestnicyZBye[$i] === null && $uczestnicyZBye[$i + 1] !== null) {
             // Uczestnik z bye przechodzi automatycznie do następnej rundy
             zapiszMecz($pdo, $runda, null, $uczestnicyZBye[$i + 1]['id'], $uczestnicyZBye[$i + 1]['id']);
         }
     }
 
+    // Generowanie drugiej rundy dla zwycięzców pierwszej
+    generujKolejnaRunde($pdo, 1); // Przekazujemy 1 jako numer rundy pierwszej
+
     return "Drabinka została wygenerowana dla $najblizszaPotega2 uczestników.";
 }
+
+// Funkcja generująca kolejną rundę
+function generujKolejnaRunde($pdo, $runda) {
+    $mecze = pobierzMecze($pdo, $runda);
+    $zwyciezcy = [];
+
+    foreach ($mecze as $mecz) {
+        if ($mecz['zwyciezca_id'] !== null) {
+            $zwyciezcy[] = $mecz['zwyciezca_id'];
+        }
+    }
+
+    if (count($zwyciezcy) < 2) {
+        return "Brak wystarczającej liczby zwycięzców, aby utworzyć nową rundę.";
+    }
+
+    $nowaRunda = $runda + 1;
+
+    // Generujemy mecze dla zwycięzców poprzedniej rundy
+    for ($i = 0; $i < count($zwyciezcy); $i += 2) {
+        zapiszMecz($pdo, $nowaRunda, $zwyciezcy[$i], $zwyciezcy[$i + 1], null);
+    }
+
+    return "Nowa runda ($nowaRunda) została wygenerowana.";
+}
+
+// Funkcja zapiszMecz i inne pozostają niezmienione
+
 
 // Funkcja zapisująca mecz
 function zapiszMecz($pdo, $runda, $uczestnik1_id, $uczestnik2_id, $zwyciezca_id) {
@@ -99,25 +130,6 @@ function pobierzMecze($pdo, $runda) {
                          ORDER BY mecze.id");
     $stmt->execute(['runda' => $runda]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
-}
-
-// Funkcja generująca kolejną rundę
-function generujKolejnaRunde($pdo, $runda) {
-    $mecze = pobierzMecze($pdo, $runda);
-    $zwyciezcy = [];
-
-    foreach ($mecze as $mecz) {
-        if ($mecz['zwyciezca_id'] !== null) {
-            $zwyciezcy[] = $mecz['zwyciezca_id'];
-        }
-    }
-
-    $nowaRunda = $runda + 1;
-    for ($i = 0; $i < count($zwyciezcy); $i += 2) {
-        zapiszMecz($pdo, $nowaRunda, $zwyciezcy[$i], $zwyciezcy[$i + 1], null);
-    }
-
-    return "Nowa runda ($nowaRunda) została wygenerowana.";
 }
 
 // Funkcja sprawdzająca, czy turniej się zakończył
@@ -217,6 +229,12 @@ function dodajObserwatora($pdo, $username, $password) {
         'username' => $username,
         'password' => $password
     ]);
+
+    return "Obserwator $username został dodany.";
+}
+
+?>
+
 
     return "Obserwator $username został dodany.";
 }
