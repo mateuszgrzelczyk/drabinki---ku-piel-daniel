@@ -69,11 +69,7 @@ $pokazPrzyciskZakonczTurniej = czyRundaFinalowaZakonczona($pdo);
 <head>
     <meta charset="UTF-8">
     <title>Turniej</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .container { max-width: 800px; margin: auto; }
-        .message { color: red; }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="container">
