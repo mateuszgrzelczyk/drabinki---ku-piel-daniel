@@ -13,7 +13,6 @@ function pobierzUczestnikow($pdo) {
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-// Funkcja generująca drabinkę
 function generujDrabinke($pdo, $uczestnicy) {
     $liczbaUczestnikow = count($uczestnicy);
 
@@ -28,6 +27,9 @@ function generujDrabinke($pdo, $uczestnicy) {
     // Jeśli liczba uczestników nie jest potęgą 2, dodajemy 'bye' dla tych, którzy nie mają przeciwnika
     $uczestnicyZBye = array_merge($uczestnicy, array_fill(0, $najblizszaPotega2 - $liczbaUczestnikow, null));
 
+    // Losowo mieszamy uczestników
+    shuffle($uczestnicyZBye);
+
     // Generowanie meczów pierwszej rundy
     $runda = 1;
     for ($i = 0; $i < $najblizszaPotega2; $i += 2) {
@@ -36,30 +38,33 @@ function generujDrabinke($pdo, $uczestnicy) {
             zapiszMecz($pdo, $runda, $uczestnicyZBye[$i]['id'], $uczestnicyZBye[$i + 1]['id'], null);
         } elseif ($uczestnicyZBye[$i] !== null && $uczestnicyZBye[$i + 1] === null) {
             // Uczestnik z bye przechodzi automatycznie do następnej rundy
-            zapiszMecz($pdo, $runda, $uczestnicyZBye[$i]['id'], null, $uczestnikZBye[$i]['id']);
+            zapiszMecz($pdo, $runda, $uczestnicyZBye[$i]['id'], null, $uczestnicyZBye[$i]['id']);
         } elseif ($uczestnicyZBye[$i] === null && $uczestnicyZBye[$i + 1] !== null) {
             // Uczestnik z bye przechodzi automatycznie do następnej rundy
             zapiszMecz($pdo, $runda, null, $uczestnicyZBye[$i + 1]['id'], $uczestnicyZBye[$i + 1]['id']);
         }
     }
 
-    // Generowanie drugiej rundy dla zwycięzców pierwszej
+    // Funkcja generująca kolejną rundę po zakończeniu pierwszej rundy
     generujKolejnaRunde($pdo, 1); // Przekazujemy 1 jako numer rundy pierwszej
 
     return "Drabinka została wygenerowana dla $najblizszaPotega2 uczestników.";
 }
 
-// Funkcja generująca kolejną rundę
+
 function generujKolejnaRunde($pdo, $runda) {
+    // Pobieramy mecze z poprzedniej rundy, ale tylko tych, którzy mają przypisanego zwycięzcę
     $mecze = pobierzMecze($pdo, $runda);
     $zwyciezcy = [];
 
+    // Pobieramy tylko tych uczestników, którzy wygrali swoje mecze (mają przypisanego zwycięzcę)
     foreach ($mecze as $mecz) {
         if ($mecz['zwyciezca_id'] !== null) {
             $zwyciezcy[] = $mecz['zwyciezca_id'];
         }
     }
 
+    // Jeśli liczba zwycięzców jest mniejsza niż 2, nie możemy utworzyć kolejnej rundy
     if (count($zwyciezcy) < 2) {
         return "Brak wystarczającej liczby zwycięzców, aby utworzyć nową rundę.";
     }
@@ -68,14 +73,53 @@ function generujKolejnaRunde($pdo, $runda) {
 
     // Generujemy mecze dla zwycięzców poprzedniej rundy
     for ($i = 0; $i < count($zwyciezcy); $i += 2) {
-        zapiszMecz($pdo, $nowaRunda, $zwyciezcy[$i], $zwyciezcy[$i + 1], null);
+        if (isset($zwyciezcy[$i + 1])) {
+            zapiszMecz($pdo, $nowaRunda, $zwyciezcy[$i], $zwyciezcy[$i + 1], null);
+        } else {
+            // W przypadku nieparzystej liczby zwycięzców (np. 3 zwycięzców w rundzie 1), jeden z nich może mieć bye
+            zapiszMecz($pdo, $nowaRunda, $zwyciezcy[$i], null, $zwyciezcy[$i]);
+        }
     }
 
     return "Nowa runda ($nowaRunda) została wygenerowana.";
 }
 
-// Funkcja zapiszMecz i inne pozostają niezmienione
 
+
+// Funkcja pobierająca całą drabinkę (uwzględniając wszystkie rundy)
+function pobierzDrabinke($pdo) {
+    // Pobieramy wszystkie mecze posortowane według rundy
+    $stmt = $pdo->query("SELECT mecze.*, u1.imie AS uczestnik1, u2.imie AS uczestnik2, uw.imie AS zwyciezca
+                         FROM mecze
+                         LEFT JOIN uczestnicy u1 ON mecze.uczestnik1_id = u1.id
+                         LEFT JOIN uczestnicy u2 ON mecze.uczestnik2_id = u2.id
+                         LEFT JOIN uczestnicy uw ON mecze.zwyciezca_id = uw.id
+                         ORDER BY mecze.runda, mecze.id");
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// Wyświetlanie drabinki
+function wyswietlDrabinke($pdo) {
+    $mecze = pobierzDrabinke($pdo);
+
+    $rundy = [];
+    foreach ($mecze as $mecz) {
+        $rundy[$mecz['runda']][] = $mecz;
+    }
+
+    // Wyświetl rundy
+    foreach ($rundy as $runda => $mecze) {
+        echo "<h2>Runda $runda</h2>";
+        foreach ($mecze as $mecz) {
+            echo "Mecz: " . $mecz['uczestnik1'] . " vs " . $mecz['uczestnik2'];
+            if ($mecz['zwyciezca'] !== null) {
+                echo " | Zwycięzca: " . $mecz['zwyciezca'];
+            }
+            echo "<br>";
+        }
+    }
+}
 
 // Funkcja zapisująca mecz
 function zapiszMecz($pdo, $runda, $uczestnik1_id, $uczestnik2_id, $zwyciezca_id) {
@@ -111,7 +155,7 @@ function zapiszMecz($pdo, $runda, $uczestnik1_id, $uczestnik2_id, $zwyciezca_id)
 // Funkcja zapisująca zwycięzcę w meczu
 function zapiszZwyciezce($pdo, $runda, $ucz1, $ucz2, $zwyciezca) {
     $stmt = $pdo->prepare("UPDATE mecze SET zwyciezca_id = :zwyciezca WHERE runda = :runda AND uczestnik1_id = :ucz1 AND uczestnik2_id = :ucz2");
-    $stmt->execute([
+    $stmt->execute([ 
         'runda' => $runda,
         'ucz1' => $ucz1,
         'ucz2' => $ucz2,
@@ -166,17 +210,7 @@ function czyRundaFinalowaZakonczona($pdo) {
     return false;
 }
 
-// Funkcja pobierająca całą drabinkę
-function pobierzDrabinke($pdo) {
-    $stmt = $pdo->query("SELECT mecze.*, u1.imie AS uczestnik1, u2.imie AS uczestnik2, uw.imie AS zwyciezca
-                         FROM mecze
-                         LEFT JOIN uczestnicy u1 ON mecze.uczestnik1_id = u1.id
-                         LEFT JOIN uczestnicy u2 ON mecze.uczestnik2_id = u2.id
-                         LEFT JOIN uczestnicy uw ON mecze.zwyciezca_id = uw.id
-                         ORDER BY mecze.runda, mecze.id");
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
-}
-
+// Funkcja resetująca turniej
 function resetujTurniej($pdo) {
     // Najpierw usuwamy dane z tabeli mecze
     $pdo->exec("DELETE FROM mecze");
@@ -232,11 +266,4 @@ function dodajObserwatora($pdo, $username, $password) {
 
     return "Obserwator $username został dodany.";
 }
-
-?>
-
-
-    return "Obserwator $username został dodany.";
-}
-
 ?>
